@@ -324,10 +324,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       children: [
         // ── Week navigator ──
         _WeekNavigator(
-          weekStart: _selectedWeekStart,
-          onPrev: _prevWeek,
-          onNext: _nextWeek,
-        ),
+  weekStart: _selectedWeekStart,
+  onPrev: _prevWeek,
+  onNext: _nextWeek,
+  onWeekPicked: (newMonday) async {
+    setState(() {
+      _selectedWeekStart = newMonday;
+      _loading = true;
+    });
+    await _buildGrid();
+    setState(() => _loading = false);
+  },
+),
 
         Expanded(
           child: SingleChildScrollView(
@@ -448,9 +456,14 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
+  final Function(DateTime) onWeekPicked; // ← NOWE
 
-  const _WeekNavigator(
-      {required this.weekStart, required this.onPrev, required this.onNext});
+  const _WeekNavigator({
+    required this.weekStart,
+    required this.onPrev,
+    required this.onNext,
+    required this.onWeekPicked, // ← NOWE
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -469,18 +482,32 @@ class _WeekNavigator extends StatelessWidget {
             visualDensity: VisualDensity.compact,
           ),
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                Text(yearFmt.format(weekStart),
+            child: GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: weekStart,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2099),
+                );
+                if (picked != null) {
+                  final monday = picked.subtract(Duration(days: picked.weekday - 1));
+                  onWeekPicked(monday);
+                }
+              },
+              child: Column(
+                children: [
+                  Text(
+                    '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
+                    textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 12, color: AppTheme.textSecondary)),
-              ],
+                        fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  Text(yearFmt.format(weekStart),
+                      style: const TextStyle(
+                          fontSize: 12, color: AppTheme.textSecondary)),
+                ],
+              ),
             ),
           ),
           IconButton(

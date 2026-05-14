@@ -124,21 +124,31 @@ class DatabaseHelper {
         where: where, whereArgs: args, orderBy: 'duty_on DESC');
   }
 
-  Future<List<Map<String, dynamic>>> getWorkStats() async {
-    final db = await database;
-    return db.rawQuery('''
-      SELECT 
-        employee_name,
-        COUNT(*) as shift_count,
-        SUM(duration_minutes) as total_minutes,
-        AVG(duration_minutes) as avg_minutes,
-        COUNT(CASE WHEN anomaly IS NOT NULL THEN 1 END) as anomaly_count
-      FROM work_entries
-      WHERE duration_minutes IS NOT NULL
-      GROUP BY employee_name
-      ORDER BY employee_name
-    ''');
+  Future<List<Map<String, dynamic>>> getWorkStats({
+  String? fromDate,
+  String? toDate,
+}) async {
+  final db = await database;
+  String whereClause = 'WHERE duration_minutes IS NOT NULL';
+  if (fromDate != null) {
+    whereClause += ' AND duty_on >= \'$fromDate\'';
   }
+  if (toDate != null) {
+    whereClause += ' AND duty_on <= \'$toDate\'';
+  }
+  return db.rawQuery('''
+    SELECT 
+      employee_name,
+      COUNT(*) as shift_count,
+      SUM(duration_minutes) as total_minutes,
+      AVG(duration_minutes) as avg_minutes,
+      COUNT(CASE WHEN anomaly IS NOT NULL THEN 1 END) as anomaly_count
+    FROM work_entries
+    $whereClause
+    GROUP BY employee_name
+    ORDER BY employee_name
+  ''');
+}
 
   Future<List<Map<String, dynamic>>> getWeeklyHours() async {
     final db = await database;
