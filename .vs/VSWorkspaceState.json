@@ -2,15 +2,15 @@
   "ExpandedNodes": [
     "",
     "\\lib",
-    "\\lib\\db",
     "\\lib\\models",
     "\\lib\\screens",
     "\\lib\\screens\\orders",
     "\\lib\\screens\\time_tracking",
     "\\lib\\services",
     "\\lib\\utils",
-    "\\lib\\widgets"
+    "\\lib\\widgets",
+    "\\windows"
   ],
-  "SelectedNode": "\\lib\\screens\\time_tracking\\attendance_screen.dart",
+  "SelectedNode": "\\lib\\widgets\\week_grid.dart",
   "PreviewInSolutionExplorer": false
 }
