@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import '../../db/database_helper.dart';
@@ -324,18 +325,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       children: [
         // ── Week navigator ──
         _WeekNavigator(
-  weekStart: _selectedWeekStart,
-  onPrev: _prevWeek,
-  onNext: _nextWeek,
-  onWeekPicked: (newMonday) async {
-    setState(() {
-      _selectedWeekStart = newMonday;
-      _loading = true;
-    });
-    await _buildGrid();
-    setState(() => _loading = false);
-  },
-),
+          weekStart: _selectedWeekStart,
+          onPrev: _prevWeek,
+          onNext: _nextWeek,
+          onWeekPicked: (newMonday) async {
+            setState(() {
+              _selectedWeekStart = newMonday;
+              _loading = true;
+            });
+            await _buildGrid();
+            setState(() => _loading = false);
+          },
+        ),
 
         Expanded(
           child: SingleChildScrollView(
@@ -456,13 +457,13 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
-  final Function(DateTime) onWeekPicked; // ← NOWE
+  final Function(DateTime) onWeekPicked;
 
   const _WeekNavigator({
     required this.weekStart,
     required this.onPrev,
     required this.onNext,
-    required this.onWeekPicked, // ← NOWE
+    required this.onWeekPicked,
   });
 
   @override
@@ -483,18 +484,7 @@ class _WeekNavigator extends StatelessWidget {
           ),
           Expanded(
             child: GestureDetector(
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: weekStart,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2099),
-                );
-                if (picked != null) {
-                  final monday = picked.subtract(Duration(days: picked.weekday - 1));
-                  onWeekPicked(monday);
-                }
-              },
+              onTap: () => _showWeekPickerModal(context),
               child: Column(
                 children: [
                   Text(
@@ -516,6 +506,19 @@ class _WeekNavigator extends StatelessWidget {
             visualDensity: VisualDensity.compact,
           ),
         ],
+      ),
+    );
+  }
+
+  void _showWeekPickerModal(BuildContext context) {
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (BuildContext ctx) => _WeekPickerModal(
+        initialWeekStart: weekStart,
+        onWeekSelected: (selected) {
+          Navigator.pop(ctx);
+          onWeekPicked(selected);
+        },
       ),
     );
   }
@@ -822,4 +825,207 @@ class _SummaryChip extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ── WEEK PICKER MODAL ──────────────────────────────────────────
+
+class _WeekPickerModal extends StatefulWidget {
+  final DateTime initialWeekStart;
+  final Function(DateTime) onWeekSelected;
+
+  const _WeekPickerModal({
+    required this.initialWeekStart,
+    required this.onWeekSelected,
+  });
+
+  @override
+  State<_WeekPickerModal> createState() => _WeekPickerModalState();
+}
+
+class _WeekPickerModalState extends State<_WeekPickerModal> {
+  late int _selectedYear;
+  late int _selectedWeekNumber;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedYear = widget.initialWeekStart.year;
+    _selectedWeekNumber = _getWeekNumber(widget.initialWeekStart);
+  }
+
+  int _getWeekNumber(DateTime date) {
+    int dayOfYear = int.parse(DateFormat("D").format(date));
+    return ((dayOfYear - date.weekday) / 7).ceil() + 1;
+  }
+
+  DateTime _getMonday(int year, int weekNumber) {
+    DateTime jan4 = DateTime(year, 1, 4);
+    DateTime firstMonday = jan4.subtract(Duration(days: jan4.weekday - 1));
+    return firstMonday.add(Duration(days: (weekNumber - 1) * 7));
+  }
+
+  int _getMaxWeeks(int year) {
+    DateTime dec31 = DateTime(year, 12, 31);
+    return _getWeekNumber(dec31);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxWeeks = _getMaxWeeks(_selectedYear);
+    final selectedMonday = _getMonday(_selectedYear, _selectedWeekNumber);
+    final selectedSunday = selectedMonday.add(const Duration(days: 6));
+    final fmt = DateFormat('d.MM');
+    final yearFmt = DateFormat('yyyy');
+
+    return Container(
+      height: 320,
+      color: Colors.white,
+      child: Column(
+        children: [
+          // Header: wyświetl wybrane daty
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withOpacity(0.07),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  '${fmt.format(selectedMonday)} — ${fmt.format(selectedSunday)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  yearFmt.format(selectedMonday),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Scrollery: Tydzień + Rok
+          Expanded(
+  child: Row(
+    children: [
+      // Tydzień
+      Expanded(
+        flex: 2,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text('Tydzień',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondary,
+                  )),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemExtent: 40,
+                itemCount: maxWeeks,
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => setState(() => _selectedWeekNumber = i + 1),
+                  child: Container(
+                    alignment: Alignment.center,
+                    color: _selectedWeekNumber == i + 1 
+                        ? AppTheme.primary.withOpacity(0.1) 
+                        : null,
+                    child: Text('${i + 1}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: _selectedWeekNumber == i + 1 
+                              ? FontWeight.w700 
+                              : FontWeight.normal,
+                        )),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Container(width: 1, color: AppTheme.border),
+      // Rok
+      Expanded(
+        flex: 1,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text('Rok',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondary,
+                  )),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemExtent: 40,
+                itemCount: 80,
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => setState(() => _selectedYear = 2020 + i),
+                  child: Container(
+                    alignment: Alignment.center,
+                    color: _selectedYear == 2020 + i 
+                        ? AppTheme.primary.withOpacity(0.1) 
+                        : null,
+                    child: Text('${2020 + i}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: _selectedYear == 2020 + i 
+                              ? FontWeight.w700 
+                              : FontWeight.normal,
+                        )),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+),
+          // Buttons
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border(
+                  top: BorderSide(color: AppTheme.border)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Anuluj'),
+                  ),
+                ),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      final monday = _getMonday(_selectedYear, _selectedWeekNumber);
+                      widget.onWeekSelected(monday);
+                    },
+                    child: const Text('OK'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
