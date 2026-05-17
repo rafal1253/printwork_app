@@ -11,6 +11,8 @@ import '../../widgets/shared_widgets.dart';
 import '../../widgets/week_grid.dart';
 import '../../widgets/shift_edit_dialog.dart';
 import '../../widgets/absence_picker_dialog.dart';
+import '../../widgets/week_picker_dialog.dart';
+
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -327,6 +329,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           weekStart: _selectedWeekStart,
           onPrev: _prevWeek,
           onNext: _nextWeek,
+          onPickWeek: (picked) async {
+            _selectedWeekStart = picked;
+            setState(() => _loading = true);
+            await _buildGrid();
+            setState(() => _loading = false);
+          },
         ),
 
         Expanded(
@@ -448,41 +456,67 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
-
-  const _WeekNavigator(
-      {required this.weekStart, required this.onPrev, required this.onNext});
-
+  /// Wywoływany gdy użytkownik wybierze tydzień z pickera.
+  final Future<void> Function(DateTime picked) onPickWeek;
+ 
+  const _WeekNavigator({
+    required this.weekStart,
+    required this.onPrev,
+    required this.onNext,
+    required this.onPickWeek,
+  });
+ 
   @override
   Widget build(BuildContext context) {
     final weekEnd = weekStart.add(const Duration(days: 6));
     final fmt = DateFormat('d MMM', 'pl_PL');
     final yearFmt = DateFormat('yyyy');
-
+ 
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
+          // ← poprzedni tydzień
           IconButton(
             icon: const Icon(Icons.chevron_left),
             onPressed: onPrev,
             visualDensity: VisualDensity.compact,
           ),
+ 
+          // Kliknięcie na zakres dat lub ikonę kalendarza → picker
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                Text(yearFmt.format(weekStart),
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTheme.textSecondary)),
-              ],
+            child: GestureDetector(
+              onTap: () => _openPicker(context),
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        yearFmt.format(weekStart),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.expand_more,
+                      size: 18, color: AppTheme.textSecondary),
+                ],
+              ),
             ),
           ),
+ 
+          // → następny tydzień
           IconButton(
             icon: const Icon(Icons.chevron_right),
             onPressed: onNext,
@@ -491,6 +525,16 @@ class _WeekNavigator extends StatelessWidget {
         ],
       ),
     );
+  }
+ 
+  Future<void> _openPicker(BuildContext context) async {
+    final result = await showDialog<DateTime>(
+      context: context,
+      builder: (_) => WeekPickerDialog(currentWeekStart: weekStart),
+    );
+    if (result != null) {
+      await onPickWeek(result);
+    }
   }
 }
 
