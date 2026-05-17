@@ -11,6 +11,6 @@
     "\\lib\\utils",
     "\\lib\\widgets"
   ],
-  "SelectedNode": "\\lib\\screens\\time_tracking\\attendance_screen.dart",
+  "SelectedNode": "\\lib\\services\\summary_service.dart",
   "PreviewInSolutionExplorer": false
 }

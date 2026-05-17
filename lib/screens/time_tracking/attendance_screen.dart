@@ -1,3 +1,5 @@
+// lib/screens/time_tracking/attendance_screen.dart
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -12,6 +14,7 @@ import '../../widgets/week_grid.dart';
 import '../../widgets/shift_edit_dialog.dart';
 import '../../widgets/absence_picker_dialog.dart';
 import '../../widgets/week_picker_dialog.dart';
+import '../../widgets/summary_tab.dart';
 
 
 class AttendanceScreen extends StatefulWidget {
@@ -20,7 +23,11 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen> {
+class _AttendanceScreenState extends State<AttendanceScreen>
+    with SingleTickerProviderStateMixin {
+  // ── TabController ─────────────────────────────────────────
+  late final TabController _tabController;
+
   // Data
   List<ShiftPair> _allShifts = [];
   List<String> _employees = [];
@@ -44,7 +51,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadFromDb();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFromDb() async {
@@ -177,7 +191,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       String employee, DateTime day, DayRecord record) async {
     setState(() => _selectedEmployee = employee);
 
-    // Jeśli pusty dzień roboczy → dialog nieobecności
     if (!record.isWeekend &&
         record.shifts.isEmpty &&
         record.rawEvents.isEmpty) {
@@ -185,13 +198,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
 
-    // Jeśli już ma nieobecność → dialog nieobecności
     if (record.hasManualAbsence) {
       await _showAbsenceDialog(employee, day, record);
       return;
     }
-
-    // Przewiń do szczegółów (selected employee zmieniony)
   }
 
   Future<void> _showAbsenceDialog(
@@ -240,10 +250,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
     if (result == null) return;
 
-    // Zaktualizuj w bazie
     await DatabaseHelper.instance.updateWorkEntry(result.toMap());
 
-    // Zaktualizuj w pamięci
     final idx = _allShifts.indexWhere((s) => s.id == result.id);
     if (idx >= 0) _allShifts[idx] = result;
 
@@ -292,7 +300,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Obecność'),
+        title: const Text('Czas pracy'),
         actions: [
           IconButton(
             icon: const Icon(Icons.upload_file_outlined),
@@ -300,23 +308,46 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             onPressed: _importFile,
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Grafik'),
+            Tab(text: 'Podsumowanie'),
+          ],
+        ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : !_hasData
-              ? EmptyState(
-                  icon: Icons.upload_file_outlined,
-                  title: 'Brak danych',
-                  subtitle:
-                      'Zaimportuj plik TXT lub CSV z rejestratora czasu pracy',
-                  action: ElevatedButton.icon(
-                    onPressed: _importFile,
-                    icon: const Icon(Icons.upload_file, size: 16),
-                    label: const Text('Importuj plik'),
-                  ),
-                )
-              : _buildContent(),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // ── Zakładka 1: Grafik ──
+          _buildScheduleTab(),
+
+          // ── Zakładka 2: Podsumowanie ──
+          SummaryTab(employees: _employees),
+        ],
+      ),
     );
+  }
+
+  // ── ZAKŁADKA GRAFIK (dawna _buildContent) ─────────────────
+
+  Widget _buildScheduleTab() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (!_hasData) {
+      return EmptyState(
+        icon: Icons.upload_file_outlined,
+        title: 'Brak danych',
+        subtitle: 'Zaimportuj plik TXT lub CSV z rejestratora czasu pracy',
+        action: ElevatedButton.icon(
+          onPressed: _importFile,
+          icon: const Icon(Icons.upload_file, size: 16),
+          label: const Text('Importuj plik'),
+        ),
+      );
+    }
+    return _buildContent();
   }
 
   Widget _buildContent() {
@@ -343,7 +374,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── TOP: Siatka tygodnia ──
                 const WeekGridLegend(),
                 const SizedBox(height: 8),
                 WeekGrid(
@@ -355,7 +385,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
                 const SizedBox(height: 20),
 
-                // ── BOTTOM: Wybór pracownika + szczegóły ──
                 if (_selectedEmployee != null) ...[
                   _buildEmployeeSelector(),
                   const SizedBox(height: 12),
@@ -415,7 +444,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Summary header
         Row(
           children: [
             SectionHeader(title: '$_selectedEmployee — tydzień'),
@@ -434,7 +462,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
         const SizedBox(height: 10),
 
-        // Dni tygodnia
         ...empRecords.map((rec) => _DayDetailCard(
               record: rec,
               onEditShift: _editShift,
@@ -456,35 +483,31 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
-  /// Wywoływany gdy użytkownik wybierze tydzień z pickera.
   final Future<void> Function(DateTime picked) onPickWeek;
- 
+
   const _WeekNavigator({
     required this.weekStart,
     required this.onPrev,
     required this.onNext,
     required this.onPickWeek,
   });
- 
+
   @override
   Widget build(BuildContext context) {
     final weekEnd = weekStart.add(const Duration(days: 6));
     final fmt = DateFormat('d MMM', 'pl_PL');
     final yearFmt = DateFormat('yyyy');
- 
+
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
-          // ← poprzedni tydzień
           IconButton(
             icon: const Icon(Icons.chevron_left),
             onPressed: onPrev,
             visualDensity: VisualDensity.compact,
           ),
- 
-          // Kliknięcie na zakres dat lub ikonę kalendarza → picker
           Expanded(
             child: GestureDetector(
               onTap: () => _openPicker(context),
@@ -515,8 +538,6 @@ class _WeekNavigator extends StatelessWidget {
               ),
             ),
           ),
- 
-          // → następny tydzień
           IconButton(
             icon: const Icon(Icons.chevron_right),
             onPressed: onNext,
@@ -526,15 +547,13 @@ class _WeekNavigator extends StatelessWidget {
       ),
     );
   }
- 
+
   Future<void> _openPicker(BuildContext context) async {
     final result = await showDialog<DateTime>(
       context: context,
       builder: (_) => WeekPickerDialog(currentWeekStart: weekStart),
     );
-    if (result != null) {
-      await onPickWeek(result);
-    }
+    if (result != null) await onPickWeek(result);
   }
 }
 
@@ -578,7 +597,6 @@ class _DayDetailCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Day header
           Padding(
             padding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -628,7 +646,6 @@ class _DayDetailCard extends StatelessWidget {
             ),
           ),
 
-          // Shifts
           if (record.shifts.isNotEmpty) ...[
             const Divider(height: 1),
             ...record.shifts.map((shift) => _ShiftRow(
@@ -679,8 +696,8 @@ class _DayDetailCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(5)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
       child: Text(label,
           style: TextStyle(
               fontSize: 12, fontWeight: FontWeight.w600, color: c)),
@@ -689,15 +706,17 @@ class _DayDetailCard extends StatelessWidget {
 
   Widget _absenceBadge(DayAbsenceType type) {
     final (Color c, Color bg) = switch (type) {
-      DayAbsenceType.vacation => (const Color(0xFF075985), const Color(0xFFE0F2FE)),
-      DayAbsenceType.sickLeave => (const Color(0xFF92400E), const Color(0xFFFEF3C7)),
+      DayAbsenceType.vacation =>
+        (const Color(0xFF075985), const Color(0xFFE0F2FE)),
+      DayAbsenceType.sickLeave =>
+        (const Color(0xFF92400E), const Color(0xFFFEF3C7)),
       _ => (AppTheme.textSecondary, AppTheme.surface),
     };
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(5)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
       child: Text(type.label,
           style: TextStyle(
               fontSize: 12, fontWeight: FontWeight.w600, color: c)),
@@ -723,7 +742,6 @@ class _ShiftRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
-            // On
             _timeCell(
               Icons.login,
               shift.dutyOn != null ? timeFmt.format(shift.dutyOn!) : null,
@@ -731,17 +749,15 @@ class _ShiftRow extends StatelessWidget {
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.arrow_forward,
-                  size: 12, color: AppTheme.textHint),
+              child:
+                  Icon(Icons.arrow_forward, size: 12, color: AppTheme.textHint),
             ),
-            // Off
             _timeCell(
               Icons.logout,
               shift.dutyOff != null ? timeFmt.format(shift.dutyOff!) : null,
               isAnomaly: shift.dutyOff == null,
             ),
             const SizedBox(width: 12),
-            // Duration
             Text(
               shift.durationFormatted,
               style: const TextStyle(
@@ -750,7 +766,6 @@ class _ShiftRow extends StatelessWidget {
                   color: AppTheme.textPrimary),
             ),
             const Spacer(),
-            // Anomaly badge
             if (shift.hasAnomaly)
               Container(
                 padding:
@@ -776,7 +791,6 @@ class _ShiftRow extends StatelessWidget {
                       size: 13, color: AppTheme.textHint),
                 ),
               ),
-            // Edit hint
             const Padding(
               padding: EdgeInsets.only(left: 6),
               child: Icon(Icons.chevron_right,
@@ -788,8 +802,7 @@ class _ShiftRow extends StatelessWidget {
     );
   }
 
-  Widget _timeCell(IconData icon, String? time,
-      {bool isAnomaly = false}) =>
+  Widget _timeCell(IconData icon, String? time, {bool isAnomaly = false}) =>
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -819,8 +832,7 @@ class _SummaryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(6),
