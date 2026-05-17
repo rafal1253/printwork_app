@@ -39,19 +39,73 @@ extension SummaryDayTypeColors on SummaryDayType {
       };
 }
 
-// ── KARTA KPI ─────────────────────────────────────────────────
+// ── KARTA GODZIN (pełna szerokość, nieklikalna) ───────────────
+
+class SummaryHoursCard extends StatelessWidget {
+  final String totalFormatted;
+
+  const SummaryHoursCard({super.key, required this.totalFormatted});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.access_time_outlined,
+                size: 20, color: AppTheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Łączny czas pracy w roku',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                totalFormatted,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── KARTA KPI (klikalna) ──────────────────────────────────────
 
 class SummaryKpiCard extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
   final IconData icon;
-
-  /// Czy karta jest aktualnie aktywna (podświetlona jako filtr).
   final bool isActive;
-
-  /// null = karta nieklikalna (np. karta godzin).
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
   const SummaryKpiCard({
     super.key,
@@ -59,8 +113,8 @@ class SummaryKpiCard extends StatelessWidget {
     required this.value,
     required this.color,
     required this.icon,
-    this.isActive = false,
-    this.onTap,
+    required this.isActive,
+    required this.onTap,
   });
 
   @override
@@ -80,7 +134,10 @@ class SummaryKpiCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: borderColor, width: isActive ? 1.5 : 1),
           boxShadow: isActive
-              ? [BoxShadow(color: color.withOpacity(0.25), blurRadius: 6, offset: const Offset(0, 2))]
+              ? [BoxShadow(
+                  color: color.withOpacity(0.25),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2))]
               : [],
         ),
         child: Column(
@@ -120,14 +177,11 @@ class SummaryKpiCard extends StatelessWidget {
   }
 }
 
-// ── RZĄD 5 KART KPI ───────────────────────────────────────────
+// ── RZĄD 4 KART KPI + baner godzin powyżej ───────────────────
 
 class SummaryKpiRow extends StatelessWidget {
   final EmployeeSummary summary;
-
-  /// Aktywny filtr — null oznacza brak filtra.
   final SummaryDayType? activeFilter;
-
   final ValueChanged<SummaryDayType?> onFilterChanged;
 
   const SummaryKpiRow({
@@ -138,68 +192,64 @@ class SummaryKpiRow extends StatelessWidget {
   });
 
   void _toggle(SummaryDayType type) {
-    // Kliknięcie aktywnej karty → odznacza filtr
     onFilterChanged(activeFilter == type ? null : type);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        // Karta godzin — nieklikalna
-        Expanded(
-          child: SummaryKpiCard(
-            label: 'Godziny',
-            value: summary.totalFormatted,
-            color: AppTheme.primary,
-            icon: Icons.access_time_outlined,
-            isActive: false,
-            onTap: null,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: SummaryKpiCard(
-            label: 'Urlop',
-            value: '${summary.vacationDays}',
-            color: SummaryDayType.vacation.color,
-            icon: SummaryDayType.vacation.icon,
-            isActive: activeFilter == SummaryDayType.vacation,
-            onTap: () => _toggle(SummaryDayType.vacation),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: SummaryKpiCard(
-            label: 'L4',
-            value: '${summary.sickLeaveDays}',
-            color: SummaryDayType.sickLeave.color,
-            icon: SummaryDayType.sickLeave.icon,
-            isActive: activeFilter == SummaryDayType.sickLeave,
-            onTap: () => _toggle(SummaryDayType.sickLeave),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: SummaryKpiCard(
-            label: 'Anomalie',
-            value: '${summary.anomalyDays}',
-            color: SummaryDayType.anomaly.color,
-            icon: SummaryDayType.anomaly.icon,
-            isActive: activeFilter == SummaryDayType.anomaly,
-            onTap: () => _toggle(SummaryDayType.anomaly),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: SummaryKpiCard(
-            label: 'Skrócone',
-            value: '${summary.undertimeDays}',
-            color: SummaryDayType.undertime.color,
-            icon: SummaryDayType.undertime.icon,
-            isActive: activeFilter == SummaryDayType.undertime,
-            onTap: () => _toggle(SummaryDayType.undertime),
-          ),
+        // Baner godzin — pełna szerokość, nieklikalne
+        SummaryHoursCard(totalFormatted: summary.totalFormatted),
+        const SizedBox(height: 8),
+
+        // 4 klikalne karty
+        Row(
+          children: [
+            Expanded(
+              child: SummaryKpiCard(
+                label: 'Urlop',
+                value: '${summary.vacationDays}',
+                color: SummaryDayType.vacation.color,
+                icon: SummaryDayType.vacation.icon,
+                isActive: activeFilter == SummaryDayType.vacation,
+                onTap: () => _toggle(SummaryDayType.vacation),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: SummaryKpiCard(
+                label: 'L4',
+                value: '${summary.sickLeaveDays}',
+                color: SummaryDayType.sickLeave.color,
+                icon: SummaryDayType.sickLeave.icon,
+                isActive: activeFilter == SummaryDayType.sickLeave,
+                onTap: () => _toggle(SummaryDayType.sickLeave),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: SummaryKpiCard(
+                label: 'Anomalie',
+                value: '${summary.anomalyDays}',
+                color: SummaryDayType.anomaly.color,
+                icon: SummaryDayType.anomaly.icon,
+                isActive: activeFilter == SummaryDayType.anomaly,
+                onTap: () => _toggle(SummaryDayType.anomaly),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: SummaryKpiCard(
+                label: 'Skrócone',
+                value: '${summary.undertimeDays}',
+                color: SummaryDayType.undertime.color,
+                icon: SummaryDayType.undertime.icon,
+                isActive: activeFilter == SummaryDayType.undertime,
+                onTap: () => _toggle(SummaryDayType.undertime),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -229,7 +279,6 @@ class SummaryDayTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Ikona typu
           Container(
             width: 32,
             height: 32,
@@ -237,8 +286,6 @@ class SummaryDayTile extends StatelessWidget {
             child: Icon(day.type.icon, size: 16, color: color),
           ),
           const SizedBox(width: 12),
-
-          // Data
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,17 +310,12 @@ class SummaryDayTile extends StatelessWidget {
               ],
             ),
           ),
-
-          // Czas lub etykieta
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-                color: bg, borderRadius: BorderRadius.circular(5)),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration:
+                BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
             child: Text(
-              day.minutes > 0
-                  ? day.formattedMinutes
-                  : day.type.label,
+              day.minutes > 0 ? day.formattedMinutes : day.type.label,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
