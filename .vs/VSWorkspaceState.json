@@ -3,14 +3,13 @@
     "",
     "\\lib",
     "\\lib\\db",
-    "\\lib\\models",
     "\\lib\\screens",
     "\\lib\\screens\\orders",
     "\\lib\\screens\\time_tracking",
     "\\lib\\services",
-    "\\lib\\utils",
-    "\\lib\\widgets"
+    "\\{lib\\{models,db,screens",
+    "\\{lib\\{models,db,screens\\{time_tracking,orders},widgets,utils},assets,test}"
   ],
-  "SelectedNode": "\\lib\\widgets\\summary_widgets.dart",
+  "SelectedNode": "\\lib\\services\\attendance_service.dart",
   "PreviewInSolutionExplorer": false
 }

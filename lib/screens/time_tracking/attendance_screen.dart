@@ -118,27 +118,67 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         }
       }
       final fileName = result.files.single.name;
-      final events = AttendanceService.parseFile(content);
-      final shifts = AttendanceService.buildShifts(events);
 
-      final existing = await DatabaseHelper.instance.getExistingDayKeys();
+      // ── DIAGNOSTYKA ──────────────────────────────────────
+      debugPrint('=== IMPORT START: $fileName ===');
+      debugPrint('Rozmiar pliku: ${bytes.length} bajtów');
+      debugPrint('BOM UTF-16: ${bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE}');
+      final lines = content.split('\n');
+      debugPrint('Liczba linii: ${lines.length}');
+      debugPrint('--- Pierwsze 3 linie ---');
+      for (int i = 0; i < lines.length && i < 3; i++) {
+        debugPrint('  [$i]: ${lines[i]}');
+      }
+      // ─────────────────────────────────────────────────────
+
+      final events = AttendanceService.parseFile(content);
+      debugPrint('Events sparsowane: ${events.length}');
+      if (events.isNotEmpty) {
+        debugPrint('  Przykład: ${events.first.employeeName} | ${events.first.type} | ${events.first.dateTime}');
+      }
+
+      final shifts = AttendanceService.buildShifts(events);
+      debugPrint('Shifts zbudowane: ${shifts.length}');
+      if (shifts.isNotEmpty) {
+        debugPrint('  Przykład: ${shifts.first.employeeName} | on=${shifts.first.dutyOn} | off=${shifts.first.dutyOff}');
+      }
+
+      // Deduplikacja per zmiana (nie per dzień) — pozwala doimportować nowe dni
+      // z pliku zawierającego również już zapisane zmiany.
+      final existing = await DatabaseHelper.instance.getExistingShiftKeys();
+      debugPrint('Istniejące klucze w DB: ${existing.length}');
+      if (existing.isNotEmpty) {
+        debugPrint('  Przykład klucza DB: ${existing.first}');
+      }
+
       int added = 0;
       int skipped = 0;
       for (final s in shifts) {
-        final date = s.dutyOn ?? s.dutyOff;
-        if (date == null) continue;
-        final dayKey = '${s.employeeName}_${date.year}-${date.month.toString().padLeft(2, "0")}-${date.day.toString().padLeft(2, "0")}';
-        if (existing.contains(dayKey)) { skipped++; continue; }
+        if (s.dutyOn == null && s.dutyOff == null) continue;
+        // Klucz: pracownik + dokładny czas wejścia;
+        // dla anomalii "brak wejścia" używamy czasu wyjścia z prefiksem "off_"
+        final shiftKey = s.dutyOn != null
+            ? '${s.employeeName}_${s.dutyOn!.toIso8601String()}'
+            : '${s.employeeName}_off_${s.dutyOff!.toIso8601String()}';
+        if (added == 0 && skipped == 0) {
+          debugPrint('  Przykład klucza nowego: $shiftKey');
+          debugPrint('  Czy istnieje w DB: ${existing.contains(shiftKey)}');
+        }
+        if (existing.contains(shiftKey)) { skipped++; continue; }
         await DatabaseHelper.instance.insertWorkEntry(s.toMap());
         added++;
       }
+      debugPrint('Dodano: $added, Pominięto: $skipped');
 
-      // Reload all from DB
+      // Reload all from DB (pracownicy z bazy, nie z pamięci)
       final allRows = await DatabaseHelper.instance.getWorkEntries();
       _allShifts = allRows.map(ShiftPair.fromMap).toList();
-      _employees = _allShifts.map((s) => s.employeeName).toSet().toList()..sort();
+      _employees = await DatabaseHelper.instance.getEmployeeNames();
       _selectedEmployee = _employees.isNotEmpty ? _employees.first : null;
-      _hasData = true;
+      _hasData = _allShifts.isNotEmpty;
+      debugPrint('Wszystkich wpisów w DB po imporcie: ${_allShifts.length}');
+      debugPrint('Pracownicy: $_employees');
+      debugPrint('_hasData: $_hasData');
 
       // Ustaw tydzień na pierwszy tydzień danych
       if (shifts.isNotEmpty) {
@@ -147,14 +187,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 (a, b) => a.isBefore(b) ? a : b);
         _selectedWeekStart = firstDate
             .subtract(Duration(days: firstDate.weekday - 1));
+        debugPrint('Ustawiono tydzień na: $_selectedWeekStart');
       }
 
       await _buildGrid();
+      debugPrint('weekGrid keys: ${_weekGrid.keys.toList()}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-              'Zaimportowano ${shifts.length} zmian z "$fileName"'),
-          backgroundColor: AppTheme.success,
+              'Dodano: $added nowych zmian, pominięto: $skipped (duplikaty)'),
+          backgroundColor: added > 0 ? AppTheme.success : AppTheme.warning,
         ));
       }
     } catch (e) {

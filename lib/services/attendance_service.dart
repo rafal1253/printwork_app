@@ -26,15 +26,33 @@ class AttendanceService {
       }
     }
 
+    // Wykryj indeksy kolumn z nagłówka (odporne na różne wersje eksportu)
+    int colEmpId = 2, colName = 3, colType = 6, colDateTime = -1;
+    if (dataStart > 0) {
+      final headerParts = lines[dataStart - 1].split(sep);
+      for (int c = 0; c < headerParts.length; c++) {
+        final h = headerParts[c].trim().toLowerCase();
+        if (h == 'enno') colEmpId = c;
+        if (h == 'name') colName = c;
+        if (h == 'in/out') colType = c;
+        if (h == 'datetime') colDateTime = c;
+      }
+    }
+
     final events = <RawEvent>[];
     for (int i = dataStart; i < lines.length; i++) {
       final parts = lines[i].split(sep);
-      if (parts.length < 9) continue;
+      // Potrzebujemy przynajmniej tyle kolumn ile wynosi max używany indeks
+      final maxCol = colDateTime >= 0 ? colDateTime : 9;
+      if (parts.length <= maxCol) continue;
       try {
-        final empId = parts[2].trim();
-        final name = parts[3].trim();
-        final type = parts[6].trim();
-        final dtStr = parts[8].trim();
+        final empId = parts[colEmpId].trim();
+        final name = parts[colName].trim();
+        final type = parts[colType].trim();
+        // DateTime: użyj wykrytego indeksu, fallback na ostatnią kolumnę
+        final dtStr = colDateTime >= 0
+            ? parts[colDateTime].trim()
+            : parts[parts.length - 1].trim();
         if (name.isEmpty || (type != 'DutyOn' && type != 'DutyOff')) continue;
         final dt = DateTime.parse(dtStr.replaceAll(' ', 'T'));
         events.add(RawEvent(

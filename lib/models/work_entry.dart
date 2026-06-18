@@ -96,7 +96,9 @@ class TimeRegistryParser {
         continue;
       }
     }
-
+    debugPrint('Liczba linii: ${lines.length}');
+debugPrint('dataStart: $dataStart');
+debugPrint('Liczba eventów: ${events.length}');
     return _pairEvents(events, sourceFile);
   }
 
