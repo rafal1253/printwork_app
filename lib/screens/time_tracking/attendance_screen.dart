@@ -1,3 +1,5 @@
+// lib/screens/time_tracking/attendance_screen.dart
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -12,6 +14,9 @@ import '../../widgets/shared_widgets.dart';
 import '../../widgets/week_grid.dart';
 import '../../widgets/shift_edit_dialog.dart';
 import '../../widgets/absence_picker_dialog.dart';
+import '../../widgets/week_picker_dialog.dart';
+import '../../widgets/summary_tab.dart';
+
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -19,7 +24,11 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen> {
+class _AttendanceScreenState extends State<AttendanceScreen>
+    with SingleTickerProviderStateMixin {
+  // ── TabController ─────────────────────────────────────────
+  late final TabController _tabController;
+
   // Data
   List<ShiftPair> _allShifts = [];
   List<String> _employees = [];
@@ -43,7 +52,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadFromDb();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFromDb() async {
@@ -103,27 +119,67 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
       }
       final fileName = result.files.single.name;
-      final events = AttendanceService.parseFile(content);
-      final shifts = AttendanceService.buildShifts(events);
 
-      final existing = await DatabaseHelper.instance.getExistingDayKeys();
+      // ── DIAGNOSTYKA ──────────────────────────────────────
+      debugPrint('=== IMPORT START: $fileName ===');
+      debugPrint('Rozmiar pliku: ${bytes.length} bajtów');
+      debugPrint('BOM UTF-16: ${bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE}');
+      final lines = content.split('\n');
+      debugPrint('Liczba linii: ${lines.length}');
+      debugPrint('--- Pierwsze 3 linie ---');
+      for (int i = 0; i < lines.length && i < 3; i++) {
+        debugPrint('  [$i]: ${lines[i]}');
+      }
+      // ─────────────────────────────────────────────────────
+
+      final events = AttendanceService.parseFile(content);
+      debugPrint('Events sparsowane: ${events.length}');
+      if (events.isNotEmpty) {
+        debugPrint('  Przykład: ${events.first.employeeName} | ${events.first.type} | ${events.first.dateTime}');
+      }
+
+      final shifts = AttendanceService.buildShifts(events);
+      debugPrint('Shifts zbudowane: ${shifts.length}');
+      if (shifts.isNotEmpty) {
+        debugPrint('  Przykład: ${shifts.first.employeeName} | on=${shifts.first.dutyOn} | off=${shifts.first.dutyOff}');
+      }
+
+      // Deduplikacja per zmiana (nie per dzień) — pozwala doimportować nowe dni
+      // z pliku zawierającego również już zapisane zmiany.
+      final existing = await DatabaseHelper.instance.getExistingShiftKeys();
+      debugPrint('Istniejące klucze w DB: ${existing.length}');
+      if (existing.isNotEmpty) {
+        debugPrint('  Przykład klucza DB: ${existing.first}');
+      }
+
       int added = 0;
       int skipped = 0;
       for (final s in shifts) {
-        final date = s.dutyOn ?? s.dutyOff;
-        if (date == null) continue;
-        final dayKey = '${s.employeeName}_${date.year}-${date.month.toString().padLeft(2, "0")}-${date.day.toString().padLeft(2, "0")}';
-        if (existing.contains(dayKey)) { skipped++; continue; }
+        if (s.dutyOn == null && s.dutyOff == null) continue;
+        // Klucz: pracownik + dokładny czas wejścia;
+        // dla anomalii "brak wejścia" używamy czasu wyjścia z prefiksem "off_"
+        final shiftKey = s.dutyOn != null
+            ? '${s.employeeName}_${s.dutyOn!.toIso8601String()}'
+            : '${s.employeeName}_off_${s.dutyOff!.toIso8601String()}';
+        if (added == 0 && skipped == 0) {
+          debugPrint('  Przykład klucza nowego: $shiftKey');
+          debugPrint('  Czy istnieje w DB: ${existing.contains(shiftKey)}');
+        }
+        if (existing.contains(shiftKey)) { skipped++; continue; }
         await DatabaseHelper.instance.insertWorkEntry(s.toMap());
         added++;
       }
+      debugPrint('Dodano: $added, Pominięto: $skipped');
 
-      // Reload all from DB
+      // Reload all from DB (pracownicy z bazy, nie z pamięci)
       final allRows = await DatabaseHelper.instance.getWorkEntries();
       _allShifts = allRows.map(ShiftPair.fromMap).toList();
-      _employees = _allShifts.map((s) => s.employeeName).toSet().toList()..sort();
+      _employees = await DatabaseHelper.instance.getEmployeeNames();
       _selectedEmployee = _employees.isNotEmpty ? _employees.first : null;
-      _hasData = true;
+      _hasData = _allShifts.isNotEmpty;
+      debugPrint('Wszystkich wpisów w DB po imporcie: ${_allShifts.length}');
+      debugPrint('Pracownicy: $_employees');
+      debugPrint('_hasData: $_hasData');
 
       // Ustaw tydzień na pierwszy tydzień danych
       if (shifts.isNotEmpty) {
@@ -132,14 +188,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 (a, b) => a.isBefore(b) ? a : b);
         _selectedWeekStart = firstDate
             .subtract(Duration(days: firstDate.weekday - 1));
+        debugPrint('Ustawiono tydzień na: $_selectedWeekStart');
       }
 
       await _buildGrid();
+      debugPrint('weekGrid keys: ${_weekGrid.keys.toList()}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-              'Zaimportowano ${shifts.length} zmian z "$fileName"'),
-          backgroundColor: AppTheme.success,
+              'Dodano: $added nowych zmian, pominięto: $skipped (duplikaty)'),
+          backgroundColor: added > 0 ? AppTheme.success : AppTheme.warning,
         ));
       }
     } catch (e) {
@@ -176,7 +234,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       String employee, DateTime day, DayRecord record) async {
     setState(() => _selectedEmployee = employee);
 
-    // Jeśli pusty dzień roboczy → dialog nieobecności
     if (!record.isWeekend &&
         record.shifts.isEmpty &&
         record.rawEvents.isEmpty) {
@@ -184,13 +241,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
 
-    // Jeśli już ma nieobecność → dialog nieobecności
     if (record.hasManualAbsence) {
       await _showAbsenceDialog(employee, day, record);
       return;
     }
-
-    // Przewiń do szczegółów (selected employee zmieniony)
   }
 
   Future<void> _showAbsenceDialog(
@@ -239,10 +293,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
     if (result == null) return;
 
-    // Zaktualizuj w bazie
     await DatabaseHelper.instance.updateWorkEntry(result.toMap());
 
-    // Zaktualizuj w pamięci
     final idx = _allShifts.indexWhere((s) => s.id == result.id);
     if (idx >= 0) _allShifts[idx] = result;
 
@@ -291,7 +343,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Obecność'),
+        title: const Text('Czas pracy'),
         actions: [
           IconButton(
             icon: const Icon(Icons.upload_file_outlined),
@@ -299,23 +351,46 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             onPressed: _importFile,
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Grafik'),
+            Tab(text: 'Podsumowanie'),
+          ],
+        ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : !_hasData
-              ? EmptyState(
-                  icon: Icons.upload_file_outlined,
-                  title: 'Brak danych',
-                  subtitle:
-                      'Zaimportuj plik TXT lub CSV z rejestratora czasu pracy',
-                  action: ElevatedButton.icon(
-                    onPressed: _importFile,
-                    icon: const Icon(Icons.upload_file, size: 16),
-                    label: const Text('Importuj plik'),
-                  ),
-                )
-              : _buildContent(),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // ── Zakładka 1: Grafik ──
+          _buildScheduleTab(),
+
+          // ── Zakładka 2: Podsumowanie ──
+          SummaryTab(employees: _employees),
+        ],
+      ),
     );
+  }
+
+  // ── ZAKŁADKA GRAFIK (dawna _buildContent) ─────────────────
+
+  Widget _buildScheduleTab() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (!_hasData) {
+      return EmptyState(
+        icon: Icons.upload_file_outlined,
+        title: 'Brak danych',
+        subtitle: 'Zaimportuj plik TXT lub CSV z rejestratora czasu pracy',
+        action: ElevatedButton.icon(
+          onPressed: _importFile,
+          icon: const Icon(Icons.upload_file, size: 16),
+          label: const Text('Importuj plik'),
+        ),
+      );
+    }
+    return _buildContent();
   }
 
   Widget _buildContent() {
@@ -328,11 +403,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           weekStart: _selectedWeekStart,
           onPrev: _prevWeek,
           onNext: _nextWeek,
+<<<<<<< HEAD
           onWeekPicked: (newMonday) async {
             setState(() {
               _selectedWeekStart = newMonday;
               _loading = true;
             });
+=======
+          onPickWeek: (picked) async {
+            _selectedWeekStart = picked;
+            setState(() => _loading = true);
+>>>>>>> New-picker-for-work-time
             await _buildGrid();
             setState(() => _loading = false);
           },
@@ -344,7 +425,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── TOP: Siatka tygodnia ──
                 const WeekGridLegend(),
                 const SizedBox(height: 8),
                 WeekGrid(
@@ -356,7 +436,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
                 const SizedBox(height: 20),
 
-                // ── BOTTOM: Wybór pracownika + szczegóły ──
                 if (_selectedEmployee != null) ...[
                   _buildEmployeeSelector(),
                   const SizedBox(height: 12),
@@ -416,7 +495,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Summary header
         Row(
           children: [
             SectionHeader(title: '$_selectedEmployee — tydzień'),
@@ -435,7 +513,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
         const SizedBox(height: 10),
 
-        // Dni tygodnia
         ...empRecords.map((rec) => _DayDetailCard(
               record: rec,
               onEditShift: _editShift,
@@ -457,13 +534,21 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
+<<<<<<< HEAD
   final Function(DateTime) onWeekPicked;
+=======
+  final Future<void> Function(DateTime picked) onPickWeek;
+>>>>>>> New-picker-for-work-time
 
   const _WeekNavigator({
     required this.weekStart,
     required this.onPrev,
     required this.onNext,
+<<<<<<< HEAD
     required this.onWeekPicked,
+=======
+    required this.onPickWeek,
+>>>>>>> New-picker-for-work-time
   });
 
   @override
@@ -484,6 +569,7 @@ class _WeekNavigator extends StatelessWidget {
           ),
           Expanded(
             child: GestureDetector(
+<<<<<<< HEAD
               onTap: () => _showWeekPickerModal(context),
               child: Column(
                 children: [
@@ -496,6 +582,32 @@ class _WeekNavigator extends StatelessWidget {
                   Text(yearFmt.format(weekStart),
                       style: const TextStyle(
                           fontSize: 12, color: AppTheme.textSecondary)),
+=======
+              onTap: () => _openPicker(context),
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        yearFmt.format(weekStart),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.expand_more,
+                      size: 18, color: AppTheme.textSecondary),
+>>>>>>> New-picker-for-work-time
                 ],
               ),
             ),
@@ -510,6 +622,7 @@ class _WeekNavigator extends StatelessWidget {
     );
   }
 
+<<<<<<< HEAD
   void _showWeekPickerModal(BuildContext context) {
     showCupertinoModalPopup<void>(
       context: context,
@@ -521,6 +634,14 @@ class _WeekNavigator extends StatelessWidget {
         },
       ),
     );
+=======
+  Future<void> _openPicker(BuildContext context) async {
+    final result = await showDialog<DateTime>(
+      context: context,
+      builder: (_) => WeekPickerDialog(currentWeekStart: weekStart),
+    );
+    if (result != null) await onPickWeek(result);
+>>>>>>> New-picker-for-work-time
   }
 }
 
@@ -564,7 +685,6 @@ class _DayDetailCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Day header
           Padding(
             padding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -614,7 +734,6 @@ class _DayDetailCard extends StatelessWidget {
             ),
           ),
 
-          // Shifts
           if (record.shifts.isNotEmpty) ...[
             const Divider(height: 1),
             ...record.shifts.map((shift) => _ShiftRow(
@@ -665,8 +784,8 @@ class _DayDetailCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(5)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
       child: Text(label,
           style: TextStyle(
               fontSize: 12, fontWeight: FontWeight.w600, color: c)),
@@ -675,15 +794,17 @@ class _DayDetailCard extends StatelessWidget {
 
   Widget _absenceBadge(DayAbsenceType type) {
     final (Color c, Color bg) = switch (type) {
-      DayAbsenceType.vacation => (const Color(0xFF075985), const Color(0xFFE0F2FE)),
-      DayAbsenceType.sickLeave => (const Color(0xFF92400E), const Color(0xFFFEF3C7)),
+      DayAbsenceType.vacation =>
+        (const Color(0xFF075985), const Color(0xFFE0F2FE)),
+      DayAbsenceType.sickLeave =>
+        (const Color(0xFF92400E), const Color(0xFFFEF3C7)),
       _ => (AppTheme.textSecondary, AppTheme.surface),
     };
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(5)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
       child: Text(type.label,
           style: TextStyle(
               fontSize: 12, fontWeight: FontWeight.w600, color: c)),
@@ -709,7 +830,6 @@ class _ShiftRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
-            // On
             _timeCell(
               Icons.login,
               shift.dutyOn != null ? timeFmt.format(shift.dutyOn!) : null,
@@ -717,17 +837,15 @@ class _ShiftRow extends StatelessWidget {
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.arrow_forward,
-                  size: 12, color: AppTheme.textHint),
+              child:
+                  Icon(Icons.arrow_forward, size: 12, color: AppTheme.textHint),
             ),
-            // Off
             _timeCell(
               Icons.logout,
               shift.dutyOff != null ? timeFmt.format(shift.dutyOff!) : null,
               isAnomaly: shift.dutyOff == null,
             ),
             const SizedBox(width: 12),
-            // Duration
             Text(
               shift.durationFormatted,
               style: const TextStyle(
@@ -736,7 +854,6 @@ class _ShiftRow extends StatelessWidget {
                   color: AppTheme.textPrimary),
             ),
             const Spacer(),
-            // Anomaly badge
             if (shift.hasAnomaly)
               Container(
                 padding:
@@ -762,7 +879,6 @@ class _ShiftRow extends StatelessWidget {
                       size: 13, color: AppTheme.textHint),
                 ),
               ),
-            // Edit hint
             const Padding(
               padding: EdgeInsets.only(left: 6),
               child: Icon(Icons.chevron_right,
@@ -774,8 +890,7 @@ class _ShiftRow extends StatelessWidget {
     );
   }
 
-  Widget _timeCell(IconData icon, String? time,
-      {bool isAnomaly = false}) =>
+  Widget _timeCell(IconData icon, String? time, {bool isAnomaly = false}) =>
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -805,8 +920,7 @@ class _SummaryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(6),
@@ -825,6 +939,7 @@ class _SummaryChip extends StatelessWidget {
           ),
         ),
       );
+<<<<<<< HEAD
 }
 
 // ── WEEK PICKER MODAL ──────────────────────────────────────────
@@ -1028,4 +1143,6 @@ class _WeekPickerModalState extends State<_WeekPickerModal> {
       ),
     );
   }
+=======
+>>>>>>> New-picker-for-work-time
 }

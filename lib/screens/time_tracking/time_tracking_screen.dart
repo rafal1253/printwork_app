@@ -57,6 +57,7 @@ class _TimeTrackingScreenState extends State<TimeTrackingScreen>
   }
 
   Future<void> _importFile() async {
+  debugPrint('### IMPORT START ###');
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['txt', 'csv', 'tsv'],
@@ -70,7 +71,12 @@ class _TimeTrackingScreenState extends State<TimeTrackingScreen>
 
     setState(() => _loading = true);
     try {
-      final parsed = TimeRegistryParser.parse(content, fileName);
+      debugPrint('=== PIERWSZE 200 ZNAKÓW ===');
+debugPrint(content.substring(0, 200.clamp(0, content.length)));
+debugPrint('=== LINIE (pierwsze 5) ===');
+content.split('\n').take(5).forEach(print);
+
+final parsed = TimeRegistryParser.parse(content, fileName);
       int added = 0;
       for (final e in parsed) {
         await DatabaseHelper.instance.insertWorkEntry(e.toMap());

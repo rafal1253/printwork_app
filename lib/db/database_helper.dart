@@ -272,17 +272,65 @@ class DatabaseHelper {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-
-  Future<Set<String>> getExistingDayKeys() async {
+  /// Zwraca zbiór unikalnych kluczy zmian już zapisanych w bazie.
+  /// Klucz = "employeeName_dutyOnISO" (lub "employeeName_off_dutyOffISO" dla anomalii brak wejścia).
+  /// Służy do pominięcia duplikatów przy kolejnych importach tego samego pliku.
+  Future<Set<String>> getExistingShiftKeys() async {
     final db = await database;
     final result = await db.rawQuery("""
-      SELECT DISTINCT employee_name,
-        strftime('%Y-%m-%d', duty_on) as day
+      SELECT employee_name, duty_on, duty_off
       FROM work_entries
-      WHERE duty_on IS NOT NULL
     """);
-    return result
-        .map((r) => '${r['employee_name']}_${r['day']}')
-        .toSet();
+    final keys = <String>{};
+    for (final r in result) {
+      final name = r['employee_name'] as String;
+      final on = r['duty_on'] as String?;
+      final off = r['duty_off'] as String?;
+      if (on != null) {
+        keys.add('${name}_$on');
+      } else if (off != null) {
+        keys.add('${name}_off_$off');
+      }
+    }
+    return keys;
   }
+
+  // ── YEAR QUERIES (Etap 1) ─────────────────────────────────
+
+  /// Zwraca wszystkie wpisy pracy dla pracownika w danym roku.
+  /// Uwzględnia wpisy gdzie duty_on jest w danym roku LUB
+  /// (duty_on IS NULL i duty_off jest w danym roku) — obsługa anomalii.
+  Future<List<Map<String, dynamic>>> getYearEntries({
+    required String employeeName,
+    required int year,
+  }) async {
+    final db = await database;
+    final yearStr = year.toString();
+    return db.rawQuery('''
+      SELECT *
+      FROM work_entries
+      WHERE employee_name = ?
+        AND (
+          strftime('%Y', duty_on) = ?
+          OR (duty_on IS NULL AND strftime('%Y', duty_off) = ?)
+        )
+      ORDER BY COALESCE(duty_on, duty_off) ASC
+    ''', [employeeName, yearStr, yearStr]);
   }
+
+  /// Zwraca wszystkie absencje (urlopy, L4, inne) dla pracownika w danym roku.
+  Future<List<Map<String, dynamic>>> getYearAbsences({
+    required String employeeName,
+    required int year,
+  }) async {
+    final db = await database;
+    final fromDate = '$year-01-01';
+    final toDate = '$year-12-31';
+    return db.query(
+      'day_absences',
+      where: 'employee_name = ? AND date >= ? AND date <= ?',
+      whereArgs: [employeeName, fromDate, toDate],
+      orderBy: 'date ASC',
+    );
+  }
+}

@@ -2,14 +2,25 @@
   "ExpandedNodes": [
     "",
     "\\lib",
+<<<<<<< HEAD
     "\\lib\\models",
+=======
+    "\\lib\\db",
+>>>>>>> New-picker-for-work-time
     "\\lib\\screens",
     "\\lib\\screens\\orders",
     "\\lib\\screens\\time_tracking",
     "\\lib\\services",
+<<<<<<< HEAD
     "\\lib\\utils",
     "\\lib\\widgets",
     "\\windows"
   ],
+=======
+    "\\{lib\\{models,db,screens",
+    "\\{lib\\{models,db,screens\\{time_tracking,orders},widgets,utils},assets,test}"
+  ],
+  "SelectedNode": "\\lib\\services\\attendance_service.dart",
+>>>>>>> New-picker-for-work-time
   "PreviewInSolutionExplorer": false
 }
