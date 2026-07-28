@@ -3,7 +3,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import '../../db/database_helper.dart';
@@ -337,6 +336,77 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     setState(() {});
   }
 
+  // ── DELETE SHIFT / DELETE DAY ───────────────────────────────
+
+  /// Usuwa pojedynczy zakres wejście–wyjście (jeden wpis).
+  Future<void> _deleteShift(ShiftPair shift) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Usuń wpis'),
+        content: const Text(
+            'Czy na pewno chcesz usunąć ten zakres wejście–wyjście? '
+            'Tej operacji nie można cofnąć.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Anuluj')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Usuń',
+                  style: TextStyle(color: AppTheme.danger))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    if (shift.id != null) {
+      await DatabaseHelper.instance.deleteWorkEntry(shift.id!);
+    }
+    _allShifts.removeWhere((s) => s.id == shift.id);
+
+    await _buildGrid();
+    if (mounted) setState(() {});
+  }
+
+  /// Usuwa wszystkie wpisy danego pracownika w danym dniu.
+  Future<void> _deleteDayEntries(
+      String employee, DateTime day, List<ShiftPair> shifts) async {
+    if (shifts.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Usuń wpisy dnia'),
+        content: Text(
+            'Czy na pewno chcesz usunąć wszystkie wpisy (${shifts.length}) '
+            'dla "$employee" w tym dniu? Tej operacji nie można cofnąć.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Anuluj')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Usuń wszystkie',
+                  style: TextStyle(color: AppTheme.danger))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    await DatabaseHelper.instance.deleteWorkEntriesForDay(
+      employeeName: employee,
+      date: _dateKey(day),
+    );
+
+    final idsToRemove = shifts.map((s) => s.id).toSet();
+    _allShifts.removeWhere(
+        (s) => s.employeeName == employee && idsToRemove.contains(s.id));
+
+    await _buildGrid();
+    if (mounted) setState(() {});
+  }
+
   // ── BUILD ──────────────────────────────────────────────────
 
   @override
@@ -403,17 +473,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           weekStart: _selectedWeekStart,
           onPrev: _prevWeek,
           onNext: _nextWeek,
-<<<<<<< HEAD
-          onWeekPicked: (newMonday) async {
-            setState(() {
-              _selectedWeekStart = newMonday;
-              _loading = true;
-            });
-=======
           onPickWeek: (picked) async {
             _selectedWeekStart = picked;
             setState(() => _loading = true);
->>>>>>> New-picker-for-work-time
             await _buildGrid();
             setState(() => _loading = false);
           },
@@ -516,9 +578,12 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         ...empRecords.map((rec) => _DayDetailCard(
               record: rec,
               onEditShift: _editShift,
+              onDeleteShift: _deleteShift,
               onAddShift: () => _addShift(rec.date, _selectedEmployee!),
               onSetAbsence: () =>
                   _showAbsenceDialog(_selectedEmployee!, rec.date, rec),
+              onDeleteDay: () => _deleteDayEntries(
+                  _selectedEmployee!, rec.date, rec.shifts),
             )),
       ],
     );
@@ -534,21 +599,13 @@ class _WeekNavigator extends StatelessWidget {
   final DateTime weekStart;
   final VoidCallback onPrev;
   final VoidCallback onNext;
-<<<<<<< HEAD
-  final Function(DateTime) onWeekPicked;
-=======
   final Future<void> Function(DateTime picked) onPickWeek;
->>>>>>> New-picker-for-work-time
 
   const _WeekNavigator({
     required this.weekStart,
     required this.onPrev,
     required this.onNext,
-<<<<<<< HEAD
-    required this.onWeekPicked,
-=======
     required this.onPickWeek,
->>>>>>> New-picker-for-work-time
   });
 
   @override
@@ -569,20 +626,6 @@ class _WeekNavigator extends StatelessWidget {
           ),
           Expanded(
             child: GestureDetector(
-<<<<<<< HEAD
-              onTap: () => _showWeekPickerModal(context),
-              child: Column(
-                children: [
-                  Text(
-                    '${fmt.format(weekStart)} — ${fmt.format(weekEnd)}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w600),
-                  ),
-                  Text(yearFmt.format(weekStart),
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTheme.textSecondary)),
-=======
               onTap: () => _openPicker(context),
               behavior: HitTestBehavior.opaque,
               child: Row(
@@ -607,7 +650,6 @@ class _WeekNavigator extends StatelessWidget {
                   const SizedBox(width: 6),
                   const Icon(Icons.expand_more,
                       size: 18, color: AppTheme.textSecondary),
->>>>>>> New-picker-for-work-time
                 ],
               ),
             ),
@@ -622,26 +664,12 @@ class _WeekNavigator extends StatelessWidget {
     );
   }
 
-<<<<<<< HEAD
-  void _showWeekPickerModal(BuildContext context) {
-    showCupertinoModalPopup<void>(
-      context: context,
-      builder: (BuildContext ctx) => _WeekPickerModal(
-        initialWeekStart: weekStart,
-        onWeekSelected: (selected) {
-          Navigator.pop(ctx);
-          onWeekPicked(selected);
-        },
-      ),
-    );
-=======
   Future<void> _openPicker(BuildContext context) async {
     final result = await showDialog<DateTime>(
       context: context,
       builder: (_) => WeekPickerDialog(currentWeekStart: weekStart),
     );
     if (result != null) await onPickWeek(result);
->>>>>>> New-picker-for-work-time
   }
 }
 
@@ -650,14 +678,18 @@ class _WeekNavigator extends StatelessWidget {
 class _DayDetailCard extends StatelessWidget {
   final DayRecord record;
   final Function(ShiftPair) onEditShift;
+  final Function(ShiftPair) onDeleteShift;
   final VoidCallback onAddShift;
   final VoidCallback onSetAbsence;
+  final VoidCallback onDeleteDay;
 
   const _DayDetailCard({
     required this.record,
     required this.onEditShift,
+    required this.onDeleteShift,
     required this.onAddShift,
     required this.onSetAbsence,
+    required this.onDeleteDay,
   });
 
   Color get _borderColor {
@@ -712,6 +744,7 @@ class _DayDetailCard extends StatelessWidget {
                     onSelected: (v) {
                       if (v == 'add') onAddShift();
                       if (v == 'absence') onSetAbsence();
+                      if (v == 'delete_day') onDeleteDay();
                     },
                     itemBuilder: (_) => [
                       const PopupMenuItem(
@@ -728,6 +761,17 @@ class _DayDetailCard extends StatelessWidget {
                             SizedBox(width: 8),
                             Text('Oznacz dzień'),
                           ])),
+                      if (record.shifts.isNotEmpty)
+                        const PopupMenuItem(
+                            value: 'delete_day',
+                            child: Row(children: [
+                              Icon(Icons.delete_sweep_outlined,
+                                  size: 16, color: AppTheme.danger),
+                              SizedBox(width: 8),
+                              Text('Usuń wpisy dnia',
+                                  style:
+                                      TextStyle(color: AppTheme.danger)),
+                            ])),
                     ],
                   ),
               ],
@@ -740,6 +784,7 @@ class _DayDetailCard extends StatelessWidget {
                   shift: shift,
                   timeFmt: timeFmt,
                   onEdit: () => onEditShift(shift),
+                  onDelete: () => onDeleteShift(shift),
                 )),
           ] else if (!isWeekend && !record.hasManualAbsence)
             Padding(
@@ -818,9 +863,14 @@ class _ShiftRow extends StatelessWidget {
   final ShiftPair shift;
   final DateFormat timeFmt;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
-  const _ShiftRow(
-      {required this.shift, required this.timeFmt, required this.onEdit});
+  const _ShiftRow({
+    required this.shift,
+    required this.timeFmt,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -879,6 +929,15 @@ class _ShiftRow extends StatelessWidget {
                       size: 13, color: AppTheme.textHint),
                 ),
               ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  size: 16, color: AppTheme.danger),
+              tooltip: 'Usuń wpis',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(4),
+              onPressed: onDelete,
+            ),
             const Padding(
               padding: EdgeInsets.only(left: 6),
               child: Icon(Icons.chevron_right,
@@ -939,210 +998,4 @@ class _SummaryChip extends StatelessWidget {
           ),
         ),
       );
-<<<<<<< HEAD
-}
-
-// ── WEEK PICKER MODAL ──────────────────────────────────────────
-
-class _WeekPickerModal extends StatefulWidget {
-  final DateTime initialWeekStart;
-  final Function(DateTime) onWeekSelected;
-
-  const _WeekPickerModal({
-    required this.initialWeekStart,
-    required this.onWeekSelected,
-  });
-
-  @override
-  State<_WeekPickerModal> createState() => _WeekPickerModalState();
-}
-
-class _WeekPickerModalState extends State<_WeekPickerModal> {
-  late int _selectedYear;
-  late int _selectedWeekNumber;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedYear = widget.initialWeekStart.year;
-    _selectedWeekNumber = _getWeekNumber(widget.initialWeekStart);
-  }
-
-  int _getWeekNumber(DateTime date) {
-    int dayOfYear = int.parse(DateFormat("D").format(date));
-    return ((dayOfYear - date.weekday) / 7).ceil() + 1;
-  }
-
-  DateTime _getMonday(int year, int weekNumber) {
-    DateTime jan4 = DateTime(year, 1, 4);
-    DateTime firstMonday = jan4.subtract(Duration(days: jan4.weekday - 1));
-    return firstMonday.add(Duration(days: (weekNumber - 1) * 7));
-  }
-
-  int _getMaxWeeks(int year) {
-    DateTime dec31 = DateTime(year, 12, 31);
-    return _getWeekNumber(dec31);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final maxWeeks = _getMaxWeeks(_selectedYear);
-    final selectedMonday = _getMonday(_selectedYear, _selectedWeekNumber);
-    final selectedSunday = selectedMonday.add(const Duration(days: 6));
-    final fmt = DateFormat('d.MM');
-    final yearFmt = DateFormat('yyyy');
-
-    return Container(
-      height: 320,
-      color: Colors.white,
-      child: Column(
-        children: [
-          // Header: wyświetl wybrane daty
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withOpacity(0.07),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  '${fmt.format(selectedMonday)} — ${fmt.format(selectedSunday)}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  yearFmt.format(selectedMonday),
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Scrollery: Tydzień + Rok
-          Expanded(
-  child: Row(
-    children: [
-      // Tydzień
-      Expanded(
-        flex: 2,
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('Tydzień',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary,
-                  )),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemExtent: 40,
-                itemCount: maxWeeks,
-                itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => setState(() => _selectedWeekNumber = i + 1),
-                  child: Container(
-                    alignment: Alignment.center,
-                    color: _selectedWeekNumber == i + 1 
-                        ? AppTheme.primary.withOpacity(0.1) 
-                        : null,
-                    child: Text('${i + 1}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: _selectedWeekNumber == i + 1 
-                              ? FontWeight.w700 
-                              : FontWeight.normal,
-                        )),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      Container(width: 1, color: AppTheme.border),
-      // Rok
-      Expanded(
-        flex: 1,
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('Rok',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary,
-                  )),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemExtent: 40,
-                itemCount: 80,
-                itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => setState(() => _selectedYear = 2020 + i),
-                  child: Container(
-                    alignment: Alignment.center,
-                    color: _selectedYear == 2020 + i 
-                        ? AppTheme.primary.withOpacity(0.1) 
-                        : null,
-                    child: Text('${2020 + i}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: _selectedYear == 2020 + i 
-                              ? FontWeight.w700 
-                              : FontWeight.normal,
-                        )),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
-  ),
-),
-          // Buttons
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border(
-                  top: BorderSide(color: AppTheme.border)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Anuluj'),
-                  ),
-                ),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () {
-                      final monday = _getMonday(_selectedYear, _selectedWeekNumber);
-                      widget.onWeekSelected(monday);
-                    },
-                    child: const Text('OK'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-=======
->>>>>>> New-picker-for-work-time
 }

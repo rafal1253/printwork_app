@@ -176,6 +176,27 @@ class DatabaseHelper {
     await db.delete('work_entries');
   }
 
+  /// Usuwa pojedynczy wpis (jeden zakres wejście–wyjście) po id.
+  Future<int> deleteWorkEntry(int id) async {
+    final db = await database;
+    return db.delete('work_entries', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Usuwa wszystkie wpisy danego pracownika w konkretnym dniu (YYYY-MM-DD).
+  /// Obejmuje też wpisy z anomalią, gdzie tylko duty_on lub tylko duty_off
+  /// jest ustawione.
+  Future<int> deleteWorkEntriesForDay({
+    required String employeeName,
+    required String date,
+  }) async {
+    final db = await database;
+    return db.delete(
+      'work_entries',
+      where: "employee_name = ? AND (date(duty_on) = ? OR date(duty_off) = ?)",
+      whereArgs: [employeeName, date, date],
+    );
+  }
+
   // ── ORDERS ────────────────────────────────────────────────
 
   Future<String> insertOrder(Map<String, dynamic> order) async {
