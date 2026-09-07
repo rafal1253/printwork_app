@@ -14,6 +14,7 @@ import '../../widgets/week_grid.dart';
 import '../../widgets/shift_edit_dialog.dart';
 import '../../widgets/absence_picker_dialog.dart';
 import '../../widgets/week_picker_dialog.dart';
+import '../../widgets/vacation_range_dialog.dart';
 import '../../widgets/summary_tab.dart';
 
 
@@ -277,6 +278,59 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     setState(() {});
   }
 
+  // ── VACATION RANGE (wielodniowa nieobecność) ───────────────
+
+  Future<void> _showVacationRangeDialog() async {
+    if (_employees.isEmpty) return;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => VacationRangeDialog(
+        employees: _employees,
+        initialEmployee: _selectedEmployee,
+      ),
+    );
+    if (result == null) return;
+
+    final employee = result['employeeName'] as String;
+    final absenceType = result['absenceType'] as DayAbsenceType;
+    final start = result['start'] as DateTime;
+    final end = result['end'] as DateTime;
+    final note = result['note'] as String?;
+    final skipWeekends = result['skipWeekends'] as bool;
+
+    final overrides = <Map<String, dynamic>>[];
+    for (var d = start; !d.isAfter(end); d = d.add(const Duration(days: 1))) {
+      if (skipWeekends &&
+          (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday)) {
+        continue;
+      }
+      final dateStr = _dateKey(d);
+      final key = '${employee}_$dateStr';
+      _absenceOverrides[key] = absenceType;
+      _dayNotes[key] = note;
+      overrides.add({
+        'employee_name': employee,
+        'date': dateStr,
+        'absence_type': absenceType.value,
+        'note': note,
+      });
+    }
+
+    setState(() => _loading = true);
+    await DatabaseHelper.instance.upsertAbsenceOverridesBatch(overrides);
+    await _buildGrid();
+    setState(() => _loading = false);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Oznaczono ${overrides.length} dni jako "${absenceType.label}" dla $employee'),
+        backgroundColor: AppTheme.success,
+      ));
+    }
+  }
+
   // ── EDIT SHIFT ─────────────────────────────────────────────
 
   Future<void> _editShift(ShiftPair shift) async {
@@ -415,6 +469,11 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       appBar: AppBar(
         title: const Text('Czas pracy'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.beach_access_outlined),
+            tooltip: 'Dodaj nieobecność (zakres dni)',
+            onPressed: _employees.isEmpty ? null : _showVacationRangeDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.upload_file_outlined),
             tooltip: 'Importuj plik CSV/TXT',

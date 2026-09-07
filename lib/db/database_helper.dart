@@ -267,6 +267,22 @@ class DatabaseHelper {
     );
   }
 
+  /// Zapisuje wiele nadpisań nieobecności naraz (jeden batch SQL) —
+  /// używane przy dodawaniu wielodniowego urlopu/L4 dla pracownika,
+  /// żeby uniknąć N osobnych zapytań do bazy.
+  /// Każdy element mapy musi zawierać: employee_name, date, absence_type, note.
+  Future<void> upsertAbsenceOverridesBatch(
+      List<Map<String, dynamic>> overrides) async {
+    if (overrides.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final o in overrides) {
+      batch.insert('day_absences', o,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<List<Map<String, dynamic>>> getAbsenceOverrides() async {
     final db = await database;
     return db.query('day_absences');

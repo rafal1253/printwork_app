@@ -2,10 +2,8 @@
   "ExpandedNodes": [
     "",
     "\\lib",
-    "\\lib\\db",
-    "\\lib\\screens",
     "\\lib\\screens\\time_tracking"
   ],
-  "SelectedNode": "\\lib\\screens\\time_tracking\\attendance_screen.dart",
+  "SelectedNode": "\\lib\\main.dart",
   "PreviewInSolutionExplorer": false
 }
